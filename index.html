@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pagaska Downloader — Download Media Sosial</title>
+  <meta name="description" content="Download video, gambar, dan audio dari TikTok, Instagram, Facebook, dan platform lainnya secara gratis." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Background effects -->
+  <div class="bg-orbs">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+  <div class="noise-overlay"></div>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="20" cy="20" r="18" stroke="currentColor" stroke-width="2"/>
+          <path d="M20 12 L20 24 M14 19 L20 25 L26 19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M13 29 L27 29" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <span class="logo-text">Pagaska</span>
+    </div>
+    <nav class="header-nav">
+      <button class="nav-btn" onclick="scrollToHistory()">Riwayat</button>
+      <a href="#platforms" class="nav-btn">Platform</a>
+    </nav>
+  </header>
+
+  <!-- Hero Section -->
+  <main class="main">
+    <section class="hero">
+      <div class="hero-badge">
+        <span class="badge-dot"></span>
+        <span>Gratis & Tanpa Batas</span>
+      </div>
+      <h1 class="hero-title">
+        Download <em>apa saja</em><br />dari mana saja
+      </h1>
+      <p class="hero-subtitle">
+        Video, gambar, dan audio dari TikTok, Instagram, Facebook, YouTube, dan 50+ platform lainnya — cepat, aman, tanpa watermark.
+      </p>
+
+      <!-- Main Input Card -->
+      <div class="input-card">
+        <div class="input-wrapper">
+          <div class="input-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </svg>
+          </div>
+          <input
+            type="url"
+            id="urlInput"
+            class="url-input"
+            placeholder="Paste URL dari TikTok, Instagram, Facebook..."
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="clear-btn" id="clearBtn" onclick="clearInput()" title="Hapus">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <button class="download-btn" id="downloadBtn" onclick="handleDownload()">
+          <span class="btn-text">Download Sekarang</span>
+          <span class="btn-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M12 5v14M5 12l7 7 7-7"/>
+            </svg>
+          </span>
+        </button>
+      </div>
+
+      <!-- Platform chips -->
+      <div class="platform-chips" id="platforms">
+        <span class="chip">TikTok</span>
+        <span class="chip">Instagram</span>
+        <span class="chip">Facebook</span>
+        <span class="chip">Twitter/X</span>
+        <span class="chip">YouTube</span>
+        <span class="chip">Pinterest</span>
+        <span class="chip">Snapchat</span>
+        <span class="chip">+banyak lagi</span>
+      </div>
+    </section>
+
+    <!-- Loading State -->
+    <section class="result-section" id="loadingSection" style="display:none;">
+      <div class="loading-card">
+        <div class="spinner">
+          <div class="spinner-ring"></div>
+          <div class="spinner-ring spinner-ring-2"></div>
+        </div>
+        <p class="loading-text">Mengambil media...</p>
+        <p class="loading-sub" id="loadingApi">Menghubungi server...</p>
+      </div>
+    </section>
+
+    <!-- Error State -->
+    <section class="result-section" id="errorSection" style="display:none;">
+      <div class="error-card">
+        <div class="error-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <h3 class="error-title">Gagal Mengambil Media</h3>
+        <p class="error-msg" id="errorMsg">Terjadi kesalahan. Coba lagi.</p>
+        <button class="retry-btn" onclick="clearResult()">Coba Lagi</button>
+      </div>
+    </section>
+
+    <!-- Result State -->
+    <section class="result-section" id="resultSection" style="display:none;">
+      <div class="result-card">
+        <button class="result-close" onclick="clearResult()" title="Tutup">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+
+        <!-- Media Preview -->
+        <div class="media-preview" id="mediaPreview"></div>
+
+        <!-- Media Info -->
+        <div class="media-info">
+          <p class="media-source" id="mediaSource"></p>
+          <h3 class="media-title" id="mediaTitle"></h3>
+        </div>
+
+        <!-- Download Options -->
+        <div class="download-options">
+          <h4 class="options-label">Pilih Format Download</h4>
+          <div class="options-grid" id="optionsGrid"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- History Section -->
+    <section class="history-section" id="historySection">
+      <div class="history-header">
+        <h2 class="history-title">Riwayat Download</h2>
+        <button class="clear-history-btn" onclick="clearHistory()">Hapus Semua</button>
+      </div>
+      <div class="history-list" id="historyList"></div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>© 2025 <strong>Pagaska Downloader</strong> — Dibuat dengan ❤️</p>
+    <p class="footer-note">Hanya untuk keperluan pribadi. Hormati hak cipta konten.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
