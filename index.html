@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet" />
   <style>
-    /* ============================================
+/* ============================================
    PAGASKA DOWNLOADER — CSS
    Dark mode, modern, elegant design
    ============================================ */
@@ -971,6 +971,35 @@ body {
   .hero-subtitle { font-size: 15px; }
   .result-card { border-radius: var(--radius-md); }
 }
+</style>
+
+  <!-- Extra styles: audio groups & ext badge -->
+  <style>
+    /* Group label separator dalam options grid */
+    .option-group-label {
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      opacity: .45;
+      margin: 1rem 0 .3rem;
+      padding: 0;
+      width: 100%;
+    }
+
+    /* Badge format file di samping label audio */
+    .ext-badge {
+      display: inline-block;
+      margin-left: .35rem;
+      padding: .1rem .4rem;
+      border-radius: 4px;
+      font-size: .65rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      background: rgba(255,255,255,.12);
+      vertical-align: middle;
+      text-transform: uppercase;
+    }
   </style>
 </head>
 <body>
@@ -1006,7 +1035,7 @@ body {
     <section class="hero">
       <div class="hero-badge">
         <span class="badge-dot"></span>
-        <span>Gratis &amp; Tanpa Batas</span>
+        <span>Gratis & Tanpa Batas</span>
       </div>
       <h1 class="hero-title">
         Download <em>apa saja</em><br />dari mana saja
@@ -1127,315 +1156,485 @@ body {
 
   <!-- Footer -->
   <footer class="footer">
-    <p>© 2026 <strong>Pagaska Downloader</strong> — Dibuat dengan ❤️</p>
+    <p>© 2025 <strong>Pagaska Downloader</strong> — Dibuat dengan ❤️</p>
     <p class="footer-note">Hanya untuk keperluan pribadi. Hormati hak cipta konten.</p>
   </footer>
 
-<script>
+  <script>
+/**
+ * PAGASKA DOWNLOADER — app.js
+ * Primary  : downr.org (scrape langsung, tanpa REST API)
+ * Fallback 1: api-faa.my.id   (REST API)
+ * Fallback 2: api.theresav.biz.id (REST API cadangan)
+ */
+
 // ============================================================
 // CONFIG
 // ============================================================
-var CONFIG = {
-  APIs: [
+const CONFIG = {
+  DOWNR_API:   'https://downr.org/api?url=',
+  REST_APIS: [
     'https://api-faa.my.id/faa/aio?url=',
-    'https://api.theresav.biz.id/download/aio?url='
+    'https://api.theresav.biz.id/download/aio?url=',
   ],
   RATE_LIMIT_MS: 5000,
   MAX_HISTORY:   20,
   HISTORY_KEY:   'pagaska_history',
+  TIMEOUT_MS:    15000,
 };
 
 // ============================================================
 // STATE
 // ============================================================
-var state = {
+const state = {
   lastRequest: 0,
   isLoading:   false,
 };
 
 // ============================================================
-// DOM HELPER
+// DOM HELPERS
 // ============================================================
-function $(id) { return document.getElementById(id); }
-function show(id) { var el = $(id); if (el) el.style.display = ''; }
-function hide(id) { var el = $(id); if (el) el.style.display = 'none'; }
+const $ = (id) => document.getElementById(id);
+
+function show(id) { $(id).style.display = ''; }
+function hide(id) { $(id).style.display = 'none'; }
 
 function showSection(name) {
-  ['loadingSection', 'errorSection', 'resultSection'].forEach(function(s) { hide(s); });
+  ['loadingSection', 'errorSection', 'resultSection'].forEach(s => hide(s));
   if (name) show(name);
 }
 
 // ============================================================
-// GLOBAL ACTIONS — dipanggil dari onclick HTML
+// INPUT HANDLING
 // ============================================================
+const urlInput = $('urlInput');
+const clearBtn = $('clearBtn');
+
+urlInput.addEventListener('input', () => {
+  clearBtn.classList.toggle('visible', urlInput.value.length > 0);
+});
+
+urlInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') handleDownload();
+});
+
 function clearInput() {
-  var urlInput = $('urlInput');
-  var clearBtn = $('clearBtn');
-  if (urlInput) urlInput.value = '';
-  if (clearBtn) clearBtn.classList.remove('visible');
-  if (urlInput) urlInput.focus();
+  urlInput.value = '';
+  clearBtn.classList.remove('visible');
+  urlInput.focus();
 }
 
 function clearResult() {
   showSection(null);
-  var urlInput = $('urlInput');
-  if (urlInput) urlInput.focus();
+  urlInput.focus();
 }
 
 function scrollToHistory() {
-  var el = $('historySection');
-  if (el) el.scrollIntoView({ behavior: 'smooth' });
-}
-
-function clearHistory() {
-  localStorage.removeItem(CONFIG.HISTORY_KEY);
-  renderHistory();
-  showToast('Riwayat dihapus.', 'info');
+  $('historySection').scrollIntoView({ behavior: 'smooth' });
 }
 
 // ============================================================
 // URL VALIDATION
 // ============================================================
-var SUPPORTED_DOMAINS = [
-  'tiktok.com','vt.tiktok.com','instagram.com','instagr.am',
-  'facebook.com','fb.com','fb.watch','twitter.com','x.com','t.co',
-  'youtube.com','youtu.be','pinterest.com','pin.it','snapchat.com',
-  'reddit.com','redd.it','dailymotion.com','vimeo.com','capcut.com',
-  'likee.video','douyin.com','weibo.com','telegram.me','t.me',
+const SUPPORTED_DOMAINS = [
+  'tiktok.com', 'vt.tiktok.com',
+  'instagram.com', 'instagr.am',
+  'facebook.com', 'fb.com', 'fb.watch',
+  'twitter.com', 'x.com', 't.co',
+  'youtube.com', 'youtu.be',
+  'pinterest.com', 'pin.it',
+  'snapchat.com',
+  'reddit.com', 'redd.it',
+  'dailymotion.com',
+  'vimeo.com',
+  'capcut.com',
+  'likee.video',
+  'douyin.com',
+  'weibo.com',
+  'telegram.me', 't.me',
 ];
 
 function isValidUrl(url) {
   try {
-    var p = new URL(url.trim());
-    return p.protocol === 'http:' || p.protocol === 'https:';
-  } catch (e) { return false; }
+    const parsed = new URL(url.trim());
+    return ['http:', 'https:'].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
 }
 
 function detectPlatform(url) {
   try {
-    var host = new URL(url).hostname.replace('www.', '');
-    for (var i = 0; i < SUPPORTED_DOMAINS.length; i++) {
-      var d = SUPPORTED_DOMAINS[i];
-      if (host === d || host.endsWith('.' + d)) {
-        var n = d.split('.')[0];
-        return n.charAt(0).toUpperCase() + n.slice(1);
+    const host = new URL(url).hostname.replace('www.', '');
+    for (const domain of SUPPORTED_DOMAINS) {
+      if (host === domain || host.endsWith('.' + domain)) {
+        const name = domain.split('.')[0];
+        return name.charAt(0).toUpperCase() + name.slice(1);
       }
     }
-  } catch (e) {}
-  return 'Media';
+    return 'Media';
+  } catch {
+    return 'Media';
+  }
 }
 
 // ============================================================
-// API FETCHING — with fallback
+// FETCH HELPER — with AbortSignal timeout
 // ============================================================
-async function fetchWithFallback(url) {
-  var lastError = null;
-  for (var i = 0; i < CONFIG.APIs.length; i++) {
-    var apiBase  = CONFIG.APIs[i];
-    var apiLabel = i === 0 ? 'API Utama' : 'API Cadangan';
-    var lbl = $('loadingApi');
-    if (lbl) lbl.textContent = 'Menghubungi ' + apiLabel + '...';
+async function fetchJSON(url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    signal: AbortSignal.timeout(CONFIG.TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// ============================================================
+// PROVIDER 1 — downr.org scrape
+// Audio formats: m4a (50kb/s), m4a (131kb/s), opus (61kb/s), opus (152kb/s)
+// ============================================================
+async function fetchFromDownr(url) {
+  setLoadingLabel('downr.org...');
+
+  const data = await fetchJSON(CONFIG.DOWNR_API + encodeURIComponent(url), {
+    headers: {
+      'Accept':  'application/json',
+      'Referer': 'https://downr.org/',
+      'Origin':  'https://downr.org',
+    },
+  });
+
+  if (data.error === true || !Array.isArray(data.medias) || data.medias.length === 0) {
+    throw new Error(data.message || 'downr: tidak ada media');
+  }
+
+  return normalizeDownr(data);
+}
+
+function normalizeDownr(d) {
+  // Separate video, audio, image — preserve all formats from downr
+  const all = d.medias.map(m => {
+    const rawType = (m.type || '').toLowerCase();
+    const ext     = (m.ext || m.extension || 'mp4').toLowerCase();
+    const label   = m.label || m.quality || `${ext.toUpperCase()}`;
+
+    // Determine media type
+    let type = 'video';
+    if (rawType === 'audio' || ['m4a', 'opus', 'mp3', 'ogg', 'flac', 'wav'].includes(ext)) {
+      type = 'audio';
+    } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
+      type = 'image';
+    }
+
+    // Build a clean quality string for audio
+    let displayLabel = label;
+    if (type === 'audio') {
+      // e.g. "m4a (131kb/s)" or "opus (152kb/s)"
+      displayLabel = label;
+    }
+
+    return {
+      type,
+      label:   displayLabel,
+      url:     m.url,
+      ext,
+      bitrate: m.bitrate || null,
+      // For sorting: prefer higher quality
+      _height: m.height || 0,
+      _br:     m.bitrate || 0,
+    };
+  }).filter(m => m.url);
+
+  // Sort videos by height desc, audios by bitrate desc
+  const videos = all
+    .filter(m => m.type === 'video')
+    .sort((a, b) => b._height - a._height);
+
+  const audios = all
+    .filter(m => m.type === 'audio')
+    .sort((a, b) => b._br - a._br);
+
+  const images = all.filter(m => m.type === 'image');
+
+  return {
+    title:     d.title  || 'Media',
+    thumbnail: d.thumbnail || '',
+    medias:    [...videos, ...audios, ...images],
+    _provider: 'downr.org',
+  };
+}
+
+// ============================================================
+// PROVIDER 2 & 3 — REST API fallback (original logic)
+// ============================================================
+async function fetchFromRestAPIs(url) {
+  let lastErr = null;
+
+  for (let i = 0; i < CONFIG.REST_APIS.length; i++) {
+    const base  = CONFIG.REST_APIS[i];
+    const label = i === 0 ? 'API Utama' : 'API Cadangan';
+    setLoadingLabel(`${label}...`);
+
     try {
-      var res = await fetch(apiBase + encodeURIComponent(url), {
-        method: 'GET',
+      const data = await fetchJSON(base + encodeURIComponent(url), {
         headers: { 'Accept': 'application/json' },
       });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      var data = await res.json();
+
       if (!data) throw new Error('Respons kosong');
-      return { data: data, apiIndex: i };
+
+      // Check API-level success
+      const isSuccess =
+        data.status === true || data.status === 'success' ||
+        data.success === true || data.ok === true ||
+        (data.result && !data.error);
+
+      if (!isSuccess && (data.message || data.error)) {
+        throw new Error(data.message || data.error || 'API status gagal');
+      }
+
+      const parsed = parseRestResponse(data);
+      if (!parsed || parsed.medias.length === 0) {
+        throw new Error('Tidak ada media ditemukan');
+      }
+
+      return { ...parsed, _provider: label };
     } catch (err) {
-      console.warn('[Pagaska] ' + apiLabel + ' gagal:', err.message);
-      lastError = err;
+      console.warn(`[Pagaska] ${label} gagal:`, err.message);
+      lastErr = err;
     }
   }
-  throw lastError || new Error('Semua API gagal merespons.');
+
+  throw lastErr || new Error('Semua API cadangan gagal.');
 }
 
-// ============================================================
-// RESPONSE PARSER
-// ============================================================
-function normalizeType(type) {
-  var t = String(type).toLowerCase();
-  if (t.indexOf('audio') !== -1 || t.indexOf('mp3') !== -1 || t.indexOf('music') !== -1) return 'audio';
-  if (t.indexOf('image') !== -1 || t.indexOf('photo') !== -1 || t.indexOf('img') !== -1 ||
-      t.indexOf('jpg') !== -1   || t.indexOf('png') !== -1) return 'image';
-  return 'video';
-}
-
-function guessExt(url, type) {
-  var t = normalizeType(type);
-  if (t === 'audio') return 'mp3';
-  if (t === 'image') return 'jpg';
-  try {
-    var pathname = new URL(url).pathname;
-    var ext = pathname.split('.').pop().toLowerCase();
-    if (['mp4','mp3','jpg','jpeg','png','gif','webm','mov','m4a'].indexOf(ext) !== -1) return ext;
-  } catch (e) {}
-  return 'mp4';
-}
-
-function parseResponse(data) {
-  var result = { title: '', thumbnail: '', medias: [] };
-  var raw = (data && (data.result || data.data)) || data;
+// ---- REST response normalizer (original parser, kept intact) ----
+function parseRestResponse(data) {
+  const result = { title: '', thumbnail: '', medias: [] };
+  const raw = data?.result || data?.data || data;
   if (!raw) return null;
 
   result.title     = raw.title || raw.caption || raw.description || data.title || '';
-  result.thumbnail = raw.thumbnail || raw.cover || raw.image || raw.thumb ||
-                     (Array.isArray(raw.images) && raw.images.length > 0 && typeof raw.images[0] === 'string' ? raw.images[0] : '') ||
-                     data.thumbnail || '';
+  result.thumbnail =
+    raw.thumbnail || raw.cover || raw.image || raw.thumb ||
+    (Array.isArray(raw.images) ? raw.images[0] : '') || data.thumbnail || '';
 
   // Pattern A: medias array
   if (Array.isArray(raw.medias) && raw.medias.length > 0) {
-    result.medias = raw.medias.map(function(m) {
-      return { type: normalizeType(m.type || m.quality || ''), label: m.quality || m.type || m.label || 'Download', url: m.url || m.download_url || m.link || '', ext: m.ext || guessExt(m.url || '', m.type || '') };
-    }).filter(function(m) { return m.url; });
-    return result;
+    result.medias = raw.medias.map(m => ({
+      type:  normalizeType(m.type || m.quality || ''),
+      label: m.quality || m.type || m.label || 'Download',
+      url:   m.url || m.download_url || m.link || '',
+      ext:   m.ext || guessExt(m.url || '', m.type || ''),
+    })).filter(m => m.url);
+    return result.medias.length > 0 ? result : null;
   }
 
-  // Pattern B: videos / audio / images sebagai key terpisah
+  // Pattern B: videos / audio / images keys
   if (raw.videos || raw.video) {
-    var vids = raw.videos || [raw.video];
-    var list = Array.isArray(vids) ? vids : [vids];
-    list.forEach(function(v, idx) {
-      var vUrl = typeof v === 'string' ? v : (v && (v.url || v.download_url || v.link) || '');
-      if (vUrl) result.medias.push({ type: 'video', label: (v && (v.quality || v.type)) || ('Video ' + (idx + 1)), url: vUrl, ext: 'mp4' });
+    const list = Array.isArray(raw.videos || raw.video)
+      ? (raw.videos || raw.video)
+      : [raw.videos || raw.video];
+    list.forEach((v, i) => {
+      const url = typeof v === 'string' ? v : (v.url || v.download_url || v.link || '');
+      if (url) result.medias.push({ type: 'video', label: v.quality || `Video ${i+1}`, url, ext: 'mp4' });
     });
   }
-
   if (raw.audio || raw.music) {
-    var aUrl = typeof raw.audio === 'string' ? raw.audio
-             : typeof raw.music === 'string' ? raw.music
-             : ((raw.audio && raw.audio.url) || (raw.music && raw.music.url) || '');
-    if (aUrl) result.medias.push({ type: 'audio', label: 'Audio / Musik', url: aUrl, ext: 'mp3' });
+    const url = typeof raw.audio === 'string' ? raw.audio
+              : typeof raw.music === 'string' ? raw.music
+              : (raw.audio?.url || raw.music?.url || '');
+    if (url) result.medias.push({ type: 'audio', label: 'Audio / Musik', url, ext: 'mp3' });
   }
-
   if (Array.isArray(raw.images) && raw.images.length > 0) {
-    raw.images.forEach(function(img, idx) {
-      var iUrl = typeof img === 'string' ? img : (img && img.url ? img.url : '');
-      if (iUrl) result.medias.push({ type: 'image', label: 'Gambar ' + (idx + 1), url: iUrl, ext: 'jpg' });
+    raw.images.forEach((img, i) => {
+      const url = typeof img === 'string' ? img : (img.url || '');
+      if (url) result.medias.push({ type: 'image', label: `Gambar ${i+1}`, url, ext: 'jpg' });
     });
   }
 
-  // Pattern C: single top-level url
+  // Pattern C: top-level url
   if (result.medias.length === 0 && (raw.url || raw.download_url || raw.link)) {
-    var sUrl = raw.url || raw.download_url || raw.link;
-    result.medias.push({ type: normalizeType(raw.type || raw.format || ''), label: raw.quality || raw.type || 'Download', url: sUrl, ext: guessExt(sUrl, raw.type || '') });
+    const url = raw.url || raw.download_url || raw.link;
+    result.medias.push({
+      type:  normalizeType(raw.type || raw.format || ''),
+      label: raw.quality || raw.type || 'Download',
+      url,
+      ext:   guessExt(url, raw.type || ''),
+    });
   }
 
-  // Pattern D: flat array di data.result
+  // Pattern D: flat array result
   if (result.medias.length === 0 && Array.isArray(data.result)) {
-    data.result.forEach(function(item, idx) {
-      var iUrl = item.url || item.download_url || item.link || '';
-      if (iUrl) result.medias.push({ type: normalizeType(item.type || item.quality || ''), label: item.quality || item.type || ('Item ' + (idx + 1)), url: iUrl, ext: guessExt(iUrl, item.type || '') });
+    data.result.forEach((item, i) => {
+      const url = item.url || item.download_url || item.link || '';
+      if (url) result.medias.push({
+        type:  normalizeType(item.type || item.quality || ''),
+        label: item.quality || item.type || `Item ${i+1}`,
+        url,
+        ext:   guessExt(url, item.type || ''),
+      });
     });
   }
 
   return result.medias.length > 0 ? result : null;
 }
 
+function normalizeType(type) {
+  const t = String(type).toLowerCase();
+  if (t.includes('audio') || t.includes('mp3') || t.includes('m4a') || t.includes('opus') || t.includes('music')) return 'audio';
+  if (t.includes('image') || t.includes('photo') || t.includes('img') || t.includes('jpg') || t.includes('png')) return 'image';
+  return 'video';
+}
+
+function guessExt(url, type) {
+  const t = normalizeType(type);
+  if (t === 'audio') return 'mp3';
+  if (t === 'image') return 'jpg';
+  try {
+    const path = new URL(url).pathname;
+    const ext  = path.split('.').pop().toLowerCase();
+    if (['mp4','mp3','jpg','jpeg','png','gif','webm','mov','m4a','opus'].includes(ext)) return ext;
+  } catch {}
+  return 'mp4';
+}
+
 // ============================================================
-// ICONS — FIX: didefinisikan sebagai var biasa, bukan const object literal
-//         di versi lama ini crash karena self-reference sebelum selesai
+// MAIN FETCH CHAIN: downr.org → REST API 1 → REST API 2
 // ============================================================
-var ICONS = {
-  video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>',
-  audio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
-  image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
-};
+async function fetchMedia(url) {
+  // Try downr.org first
+  try {
+    const result = await fetchFromDownr(url);
+    console.log('[Pagaska] ✓ downr.org berhasil');
+    return result;
+  } catch (err) {
+    console.warn('[Pagaska] ✗ downr.org gagal:', err.message);
+  }
+
+  // Fallback to REST APIs
+  console.log('[Pagaska] Beralih ke REST API...');
+  return fetchFromRestAPIs(url);
+}
 
 // ============================================================
 // RENDER RESULT
 // ============================================================
+
+// Icon SVGs
+const ICONS = {
+  video: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>`,
+  audio: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
+  image: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`,
+};
+
 function renderResult(parsed, url) {
-  var platform = detectPlatform(url);
-  $('mediaSource').textContent = platform;
-  $('mediaTitle').textContent  = parsed.title || ('Media dari ' + platform);
+  const platform = detectPlatform(url);
 
-  var previewEl = $('mediaPreview');
-  previewEl.innerHTML   = '';
+  // Badge: platform + provider
+  $('mediaSource').textContent = `${platform} · via ${parsed._provider}`;
+
+  // Title
+  $('mediaTitle').textContent = parsed.title || `Media dari ${platform}`;
+
+  // Preview
+  const previewEl = $('mediaPreview');
+  previewEl.innerHTML = '';
   previewEl.style.minHeight = '';
-  previewEl.style.display   = '';
 
-  var imageMedias = parsed.medias.filter(function(m) { return m.type === 'image'; });
-  var videoMedias = parsed.medias.filter(function(m) { return m.type === 'video'; });
+  const imageMedias = parsed.medias.filter(m => m.type === 'image');
+  const videoMedias = parsed.medias.filter(m => m.type === 'video');
 
   if (imageMedias.length > 1) {
-    var grid = document.createElement('div');
+    const grid = document.createElement('div');
     grid.className = 'preview-images-grid';
-    imageMedias.slice(0, 6).forEach(function(m) {
-      var img = document.createElement('img');
-      img.src     = parsed.thumbnail || m.url;
-      img.alt     = 'Preview';
+    imageMedias.slice(0, 6).forEach(m => {
+      const img = document.createElement('img');
+      img.src = parsed.thumbnail || m.url;
+      img.alt = 'Preview';
       img.loading = 'lazy';
-      img.onerror = function() { img.style.display = 'none'; };
+      img.onerror = () => { img.style.display = 'none'; };
       grid.appendChild(img);
     });
     previewEl.appendChild(grid);
   } else if (videoMedias.length > 0 && videoMedias[0].url) {
-    var video = document.createElement('video');
-    video.src      = videoMedias[0].url;
+    const video = document.createElement('video');
+    video.src = videoMedias[0].url;
     video.controls = true;
-    video.preload  = 'metadata';
-    video.poster   = parsed.thumbnail || '';
+    video.preload = 'metadata';
+    video.poster = parsed.thumbnail || '';
     video.setAttribute('playsinline', '');
     previewEl.appendChild(video);
   } else if (parsed.thumbnail) {
-    var img = document.createElement('img');
-    img.src     = parsed.thumbnail;
-    img.alt     = 'Thumbnail';
+    const img = document.createElement('img');
+    img.src = parsed.thumbnail;
+    img.alt = 'Thumbnail';
     img.loading = 'lazy';
-    img.onerror = function() { previewEl.style.display = 'none'; };
+    img.onerror = () => { previewEl.style.display = 'none'; };
     previewEl.appendChild(img);
   } else {
     previewEl.style.minHeight = '0';
   }
 
-  var optGrid = $('optionsGrid');
-  optGrid.innerHTML = '';
+  // Download options — grouped by type
+  const grid = $('optionsGrid');
+  grid.innerHTML = '';
 
   if (parsed.medias.length === 0) {
-    optGrid.innerHTML = '<p style="color:var(--text-muted);font-size:14px;">Tidak ada link download yang ditemukan.</p>';
-    showSection('resultSection');
+    grid.innerHTML = '<p style="color:var(--text-muted);font-size:14px;">Tidak ada link download yang ditemukan.</p>';
     return;
   }
 
-  parsed.medias.forEach(function(media) {
-    var item = document.createElement('div');
-    item.className = 'option-item';
+  const groups = [
+    { type: 'video', label: '🎬 Video' },
+    { type: 'audio', label: '🎵 Audio'  },
+    { type: 'image', label: '🖼️ Gambar' },
+  ];
 
-    // Ambil icon dari ICONS — tidak ada lagi self-reference / undefined
-    var iconHtml = ICONS[media.type] || ICONS.video;
+  groups.forEach(({ type, label }) => {
+    const items = parsed.medias.filter(m => m.type === type);
+    if (!items.length) return;
 
-    item.innerHTML =
-      '<div class="option-info">' +
-        '<div class="option-type-icon ' + escHtml(media.type) + '">' + iconHtml + '</div>' +
-        '<div class="option-details">' +
-          '<span class="option-name">' + escHtml(media.label) + '</span>' +
-          '<span class="option-meta">' + escHtml(media.type.toUpperCase()) + ' · .' + escHtml(media.ext) + '</span>' +
-        '</div>' +
-      '</div>' +
-      '<div class="option-actions">' +
-        '<button class="btn-copy-link" title="Salin link">' +
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
-            '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>' +
-            '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>' +
-          '</svg>' +
-        '</button>' +
-        '<a class="btn-dl" href="' + escAttr(media.url) + '" target="_blank" rel="noopener noreferrer" download>' +
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">' +
-            '<path d="M12 5v14M5 12l7 7 7-7"/>' +
-          '</svg>' +
-          'Download' +
-        '</a>' +
-      '</div>';
+    // Group header
+    const header = document.createElement('p');
+    header.className = 'option-group-label';
+    header.textContent = label;
+    grid.appendChild(header);
 
-    // FIX: event listener langsung — tidak pakai onclick string yang bisa corrupt URL
-    (function(capturedUrl, btn) {
-      btn.addEventListener('click', function() { copyLink(capturedUrl, btn); });
-    })(media.url, item.querySelector('.btn-copy-link'));
+    items.forEach(media => {
+      const item = document.createElement('div');
+      item.className = 'option-item';
 
-    optGrid.appendChild(item);
+      // For audio: show ext badge (m4a / opus / mp3)
+      const extBadge = type === 'audio'
+        ? `<span class="ext-badge">.${media.ext}</span>`
+        : '';
+
+      item.innerHTML = `
+        <div class="option-info">
+          <div class="option-type-icon ${type}">${ICONS[type] || ICONS.video}</div>
+          <div class="option-details">
+            <span class="option-name">${escHtml(media.label)}${extBadge}</span>
+            <span class="option-meta">${type.toUpperCase()} · .${media.ext}</span>
+          </div>
+        </div>
+        <div class="option-actions">
+          <button class="btn-copy-link" title="Salin link" onclick="copyLink('${escAttr(media.url)}', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
+          <a class="btn-dl" href="${escAttr(media.url)}" target="_blank" rel="noopener noreferrer" download>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M12 5v14M5 12l7 7 7-7"/>
+            </svg>
+            Download
+          </a>
+        </div>
+      `;
+      grid.appendChild(item);
+    });
   });
 
   showSection('resultSection');
@@ -1447,62 +1646,45 @@ function renderResult(parsed, url) {
 async function handleDownload() {
   if (state.isLoading) return;
 
-  var urlInput = $('urlInput');
-  var url      = urlInput ? urlInput.value.trim() : '';
+  const url = urlInput.value.trim();
 
   if (!url) {
     showToast('Masukkan URL terlebih dahulu.', 'error');
-    if (urlInput) urlInput.focus();
+    urlInput.focus();
     return;
   }
+
   if (!isValidUrl(url)) {
     showToast('URL tidak valid. Pastikan dimulai dengan https://', 'error');
     return;
   }
 
-  var now = Date.now();
+  const now = Date.now();
   if (now - state.lastRequest < CONFIG.RATE_LIMIT_MS) {
-    var wait = Math.ceil((CONFIG.RATE_LIMIT_MS - (now - state.lastRequest)) / 1000);
-    showToast('Tunggu ' + wait + ' detik sebelum request berikutnya.', 'error');
+    const wait = Math.ceil((CONFIG.RATE_LIMIT_MS - (now - state.lastRequest)) / 1000);
+    showToast(`Tunggu ${wait} detik sebelum request berikutnya.`, 'error');
     return;
   }
 
-  state.isLoading   = true;
+  state.isLoading = true;
   state.lastRequest = now;
-  var dlBtn = $('downloadBtn');
-  if (dlBtn) dlBtn.disabled = true;
+  $('downloadBtn').disabled = true;
   showSection('loadingSection');
 
   try {
-    var res      = await fetchWithFallback(url);
-    var data     = res.data;
-    var apiIndex = res.apiIndex;
+    const result = await fetchMedia(url);
 
-    var isSuccess = data.status === true || data.status === 'success' ||
-                    data.success === true || data.ok === true ||
-                    (data.result && !data.error);
-
-    if (!isSuccess && (data.message || data.error)) {
-      throw new Error(data.message || data.error || 'API mengembalikan status gagal.');
-    }
-
-    var parsed = parseResponse(data);
-    if (!parsed || parsed.medias.length === 0) {
-      throw new Error('Tidak ada media yang dapat diunduh dari URL ini. Coba link lain.');
-    }
-
-    saveHistory(url, parsed);
-    renderResult(parsed, url);
-    showToast('Berhasil! (via ' + (apiIndex === 0 ? 'API Utama' : 'API Cadangan') + ')', 'success');
+    saveHistory(url, result);
+    renderResult(result, url);
+    showToast(`Berhasil! (via ${result._provider})`, 'success');
 
   } catch (err) {
     console.error('[Pagaska] Error:', err);
-    var errEl = $('errorMsg');
-    if (errEl) errEl.textContent = err.message || 'Terjadi kesalahan. Coba lagi.';
+    $('errorMsg').textContent = err.message || 'Terjadi kesalahan. Coba lagi.';
     showSection('errorSection');
   } finally {
     state.isLoading = false;
-    if (dlBtn) dlBtn.disabled = false;
+    $('downloadBtn').disabled = false;
   }
 }
 
@@ -1513,17 +1695,13 @@ async function copyLink(url, btn) {
   try {
     await navigator.clipboard.writeText(url);
     btn.classList.add('copied');
-    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>`;
     showToast('Link disalin!', 'success');
-    setTimeout(function() {
+    setTimeout(() => {
       btn.classList.remove('copied');
-      btn.innerHTML =
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
-          '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>' +
-          '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>' +
-        '</svg>';
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
     }, 2000);
-  } catch (e) {
+  } catch {
     showToast('Gagal menyalin link.', 'error');
   }
 }
@@ -1533,101 +1711,109 @@ async function copyLink(url, btn) {
 // ============================================================
 function loadHistory() {
   try { return JSON.parse(localStorage.getItem(CONFIG.HISTORY_KEY) || '[]'); }
-  catch (e) { return []; }
+  catch { return []; }
+}
+
+function saveHistoryData(items) {
+  localStorage.setItem(CONFIG.HISTORY_KEY, JSON.stringify(items));
 }
 
 function saveHistory(url, parsed) {
-  var items    = loadHistory();
-  var filtered = items.filter(function(h) { return h.url !== url; });
-  filtered.unshift({ url: url, title: parsed.title || url, thumbnail: parsed.thumbnail || '', time: Date.now() });
-  localStorage.setItem(CONFIG.HISTORY_KEY, JSON.stringify(filtered.slice(0, CONFIG.MAX_HISTORY)));
+  const items = loadHistory();
+  const filtered = items.filter(h => h.url !== url);
+  filtered.unshift({
+    url,
+    title:     parsed.title || url,
+    thumbnail: parsed.thumbnail || '',
+    time:      Date.now(),
+  });
+  saveHistoryData(filtered.slice(0, CONFIG.MAX_HISTORY));
   renderHistory();
 }
 
+function clearHistory() {
+  localStorage.removeItem(CONFIG.HISTORY_KEY);
+  renderHistory();
+  showToast('Riwayat dihapus.', 'info');
+}
+
 function reuseHistory(url) {
-  var urlInput = $('urlInput');
-  var clearBtn = $('clearBtn');
-  if (urlInput) urlInput.value = url;
-  if (clearBtn) clearBtn.classList.add('visible');
+  urlInput.value = url;
+  clearBtn.classList.add('visible');
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  setTimeout(function() { handleDownload(); }, 300);
+  setTimeout(() => handleDownload(), 300);
 }
 
 function renderHistory() {
-  var items   = loadHistory();
-  var section = $('historySection');
-  var list    = $('historyList');
-  var header  = section ? section.querySelector('.history-header') : null;
-  if (!list) return;
+  const items = loadHistory();
+  const section = $('historySection');
+  const list = $('historyList');
+  const header = section.querySelector('.history-header');
 
   if (items.length === 0) {
-    if (header) header.style.display = 'none';
-    list.innerHTML = '<div class="history-empty"><p>Belum ada riwayat download. Mulai download sekarang!</p></div>';
+    header.style.display = 'none';
+    list.innerHTML = `<div class="history-empty"><p>Belum ada riwayat download. Mulai download sekarang!</p></div>`;
     return;
   }
 
-  if (header) header.style.display = 'flex';
+  header.style.display = 'flex';
   list.innerHTML = '';
 
-  items.forEach(function(item) {
-    var el       = document.createElement('div');
+  items.forEach(item => {
+    const el = document.createElement('div');
     el.className = 'history-item';
+    const shortUrl = item.url.length > 55 ? item.url.slice(0, 52) + '…' : item.url;
 
-    var shortUrl = item.url.length > 55 ? item.url.slice(0, 52) + '…' : item.url;
-
-    el.innerHTML =
-      (item.thumbnail
-        ? '<img class="history-thumb" src="' + escAttr(item.thumbnail) + '" alt="thumb" loading="lazy">'
-        : '<div class="history-thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>'
-      ) +
-      '<div class="history-details">' +
-        '<span class="history-url" title="' + escAttr(item.url) + '">' + escHtml(shortUrl) + '</span>' +
-        '<span class="history-time">' + formatTimeAgo(item.time) + '</span>' +
-      '</div>' +
-      '<button class="history-reuse">Download lagi</button>';
-
-    // FIX: event listener langsung — tidak ada inline onclick dengan string URL
-    (function(capturedUrl, btn) {
-      btn.addEventListener('click', function() { reuseHistory(capturedUrl); });
-    })(item.url, el.querySelector('.history-reuse'));
-
-    var thumbImg = el.querySelector('.history-thumb');
-    if (thumbImg) {
-      thumbImg.onerror = function() {
-        thumbImg.outerHTML = '<div class="history-thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>';
-      };
-    }
-
+    el.innerHTML = `
+      ${item.thumbnail
+        ? `<img class="history-thumb" src="${escAttr(item.thumbnail)}" alt="thumb" loading="lazy" onerror="this.outerHTML='<div class=\\'history-thumb-placeholder\\'><svg viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'currentColor\\' stroke-width=\\'2\\'><path d=\\'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z\\'/></svg></div>'">`
+        : `<div class="history-thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>`
+      }
+      <div class="history-details">
+        <span class="history-url" title="${escAttr(item.url)}">${escHtml(shortUrl)}</span>
+        <span class="history-time">${formatTimeAgo(item.time)}</span>
+      </div>
+      <button class="history-reuse" onclick="reuseHistory('${escAttr(item.url)}')">Download lagi</button>
+    `;
     list.appendChild(el);
   });
 }
 
 function formatTimeAgo(ts) {
-  var diff = Date.now() - ts;
-  var m = Math.floor(diff / 60000);
+  const diff = Date.now() - ts;
+  const m = Math.floor(diff / 60000);
   if (m < 1)  return 'Baru saja';
-  if (m < 60) return m + ' menit lalu';
-  var h = Math.floor(m / 60);
-  if (h < 24) return h + ' jam lalu';
-  return Math.floor(h / 24) + ' hari lalu';
+  if (m < 60) return `${m} menit lalu`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} jam lalu`;
+  return `${Math.floor(h / 24)} hari lalu`;
+}
+
+// ============================================================
+// LOADING LABEL
+// ============================================================
+function setLoadingLabel(text) {
+  const el = $('loadingApi');
+  if (el) el.textContent = `Menghubungi ${text}`;
 }
 
 // ============================================================
 // TOAST
 // ============================================================
-var toastTimeout;
-function showToast(msg, type) {
-  type = type || 'info';
-  var toast = document.querySelector('.toast');
+let toastTimeout;
+
+function showToast(msg, type = 'info') {
+  let toast = document.querySelector('.toast');
   if (!toast) {
     toast = document.createElement('div');
+    toast.className = 'toast';
     document.body.appendChild(toast);
   }
-  toast.className = 'toast ' + type;
-  toast.innerHTML = '<div class="toast-dot"></div>' + escHtml(msg);
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<div class="toast-dot"></div>${escHtml(msg)}`;
   clearTimeout(toastTimeout);
-  requestAnimationFrame(function() { toast.classList.add('show'); });
-  toastTimeout = setTimeout(function() { toast.classList.remove('show'); }, 3000);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  toastTimeout = setTimeout(() => toast.classList.remove('show'), 3000);
 }
 
 // ============================================================
@@ -1635,41 +1821,29 @@ function showToast(msg, type) {
 // ============================================================
 function escHtml(str) {
   return String(str)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;')
+    .replace(/'/g,  '&#039;');
 }
+
 function escAttr(str) {
-  return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
 // ============================================================
-// INIT — semua listener DOM dipasang di sini
+// INIT
 // ============================================================
-document.addEventListener('DOMContentLoaded', function() {
-  var urlInput = $('urlInput');
-  var clearBtn = $('clearBtn');
+document.addEventListener('DOMContentLoaded', () => {
+  renderHistory();
+  urlInput.focus();
 
-  if (!urlInput || !clearBtn) {
-    console.error('[Pagaska] Elemen #urlInput atau #clearBtn tidak ditemukan di HTML.');
-    return;
-  }
-
-  urlInput.addEventListener('input', function() {
-    clearBtn.classList.toggle('visible', urlInput.value.length > 0);
-  });
-
-  urlInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') handleDownload();
-  });
-
-  urlInput.addEventListener('paste', function() {
-    setTimeout(function() {
+  urlInput.addEventListener('paste', () => {
+    setTimeout(() => {
       clearBtn.classList.toggle('visible', urlInput.value.length > 0);
     }, 50);
   });
-
-  renderHistory();
-  urlInput.focus();
 });
 </script>
 </body>
