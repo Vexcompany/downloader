@@ -730,6 +730,28 @@ body {
 .btn-copy-link svg { width: 14px; height: 14px; }
 .btn-copy-link.copied { color: var(--accent-3); }
 
+.btn-convert-mp3 {
+  background: rgba(124,92,252,0.1);
+  border: 1px solid rgba(124,92,252,0.3);
+  border-radius: var(--radius-sm);
+  padding: 0 11px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  color: #a78bfa;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+.btn-convert-mp3:hover { background: rgba(124,92,252,0.22); border-color: rgba(124,92,252,0.55); color: #c4b5fd; }
+.btn-convert-mp3:disabled { opacity: 0.65; cursor: not-allowed; }
+.btn-convert-mp3 svg { width: 14px; height: 14px; flex-shrink: 0; }
+@keyframes spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+
 /* ====== HISTORY ====== */
 .history-section {
   margin-top: 64px;
@@ -1140,7 +1162,6 @@ var CONFIG = {
     'https://api-faa.my.id/faa/aio?url=',
     'https://api.theresav.biz.id/download/aio?url='
   ],
-  RATE_LIMIT_MS: 5000,
   MAX_HISTORY:   20,
   HISTORY_KEY:   'pagaska_history',
 };
@@ -1149,7 +1170,6 @@ var CONFIG = {
 // STATE
 // ============================================================
 var state = {
-  lastRequest: 0,
   isLoading:   false,
 };
 
@@ -1404,8 +1424,14 @@ function renderResult(parsed, url) {
     var item = document.createElement('div');
     item.className = 'option-item';
 
-    // Ambil icon dari ICONS — tidak ada lagi self-reference / undefined
     var iconHtml = ICONS[media.type] || ICONS.video;
+
+    var convertBtnHtml = media.type === 'video'
+      ? '<button class="btn-convert-mp3" title="Convert ke MP3">'
+          + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+          + '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>'
+          + '</svg> MP3</button>'
+      : '';
 
     item.innerHTML =
       '<div class="option-info">' +
@@ -1416,6 +1442,7 @@ function renderResult(parsed, url) {
         '</div>' +
       '</div>' +
       '<div class="option-actions">' +
+        convertBtnHtml +
         '<button class="btn-copy-link" title="Salin link">' +
           '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
             '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>' +
@@ -1430,10 +1457,13 @@ function renderResult(parsed, url) {
         '</a>' +
       '</div>';
 
-    // FIX: event listener langsung — tidak pakai onclick string yang bisa corrupt URL
-    (function(capturedUrl, btn) {
-      btn.addEventListener('click', function() { copyLink(capturedUrl, btn); });
-    })(media.url, item.querySelector('.btn-copy-link'));
+    (function(capturedUrl, capturedItem) {
+      capturedItem.querySelector('.btn-copy-link').addEventListener('click', function() {
+        copyLink(capturedUrl, this);
+      });
+      var cvBtn = capturedItem.querySelector('.btn-convert-mp3');
+      if (cvBtn) cvBtn.addEventListener('click', function() { convertToMp3(capturedUrl, this); });
+    })(media.url, item);
 
     optGrid.appendChild(item);
   });
@@ -1460,15 +1490,7 @@ async function handleDownload() {
     return;
   }
 
-  var now = Date.now();
-  if (now - state.lastRequest < CONFIG.RATE_LIMIT_MS) {
-    var wait = Math.ceil((CONFIG.RATE_LIMIT_MS - (now - state.lastRequest)) / 1000);
-    showToast('Tunggu ' + wait + ' detik sebelum request berikutnya.', 'error');
-    return;
-  }
-
-  state.isLoading   = true;
-  state.lastRequest = now;
+  state.isLoading = true;
   var dlBtn = $('downloadBtn');
   if (dlBtn) dlBtn.disabled = true;
   showSection('loadingSection');
@@ -1671,6 +1693,76 @@ document.addEventListener('DOMContentLoaded', function() {
   renderHistory();
   urlInput.focus();
 });
+
+// ============================================================
+// FFMPEG.WASM — lazy loader + video to MP3 converter
+// ============================================================
+var ffmpegState = { loaded: false, loading: false, instance: null, fetchFile: null };
+
+async function loadFFmpeg() {
+  if (ffmpegState.loaded) return;
+  if (ffmpegState.loading) {
+    while (ffmpegState.loading) await new Promise(function(r) { setTimeout(r, 80); });
+    return;
+  }
+  ffmpegState.loading = true;
+  try {
+    var mod      = await import('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
+    var utilMod  = await import('https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js');
+    var ff = new mod.FFmpeg();
+    await ff.load({ coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js' });
+    ffmpegState.instance  = ff;
+    ffmpegState.fetchFile = utilMod.fetchFile;
+    ffmpegState.loaded    = true;
+  } finally {
+    ffmpegState.loading = false;
+  }
+}
+
+async function convertToMp3(videoUrl, btn) {
+  var originalHtml = btn.innerHTML;
+  var SPIN = 'style="animation:spin 1s linear infinite"';
+  var spinIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' + SPIN + '>'
+    + '<path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>'
+    + '</svg>';
+  try {
+    btn.disabled  = true;
+    btn.innerHTML = spinIcon + ' Memuat...';
+    showToast('Memuat FFmpeg.wasm...', 'info');
+    await loadFFmpeg();
+
+    var ff        = ffmpegState.instance;
+    var fetchFile = ffmpegState.fetchFile;
+
+    btn.innerHTML = spinIcon + ' Mengunduh...';
+    showToast('Mengunduh video...', 'info');
+    await ff.writeFile('input.mp4', await fetchFile(videoUrl));
+
+    btn.innerHTML = spinIcon + ' Konversi...';
+    showToast('Mengkonversi ke MP3...', 'info');
+    await ff.exec(['-i','input.mp4','-vn','-ar','44100','-ac','2','-b:a','192k','output.mp3']);
+
+    var mp3Data = await ff.readFile('output.mp3');
+    var blob    = new Blob([mp3Data.buffer], { type: 'audio/mpeg' });
+    var dlUrl   = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = dlUrl; a.download = 'audio.mp3';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(dlUrl); }, 60000);
+
+    try { await ff.deleteFile('input.mp4'); } catch(e) {}
+    try { await ff.deleteFile('output.mp3'); } catch(e) {}
+
+    showToast('Selesai! MP3 diunduh.', 'success');
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Selesai';
+    setTimeout(function() { btn.innerHTML = originalHtml; btn.disabled = false; }, 3000);
+  } catch(err) {
+    console.error('[FFmpeg]', err);
+    showToast('Gagal: ' + (err.message || 'error tidak diketahui'), 'error');
+    btn.innerHTML = originalHtml;
+    btn.disabled  = false;
+  }
+}
 </script>
 </body>
 </html>
