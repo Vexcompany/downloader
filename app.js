@@ -1,27 +1,25 @@
 /**
  * PAGASKA DOWNLOADER — app.js
- * Download media from social platforms via REST API
- * Updated: Fixed API endpoints
+ * Download media using anabot.my.id specific APIs
+ * Supports: YouTube (MP3/MP4), TikTok, Instagram
  */
 
 // ============================
 // CONFIG
 // ============================
 const CONFIG = {
-  APIs: [
-    'https://api.pansy.5gv2.cc/api/aio?url=',           // Primary - Fast
-    'https://api.ryzendesu.vip/api/downloader/aio?url=', // Fallback - Ryzen
-    'https://api.siputzx.my.id/api/d/downloader?url='    // Backup - Siputzx
-  ],
-  MAX_HISTORY:  20,
-  HISTORY_KEY:  'pagaska_history',
+  API_BASE: 'https://anabot.my.id/api/download',
+  API_KEY: 'freeApikey',
+  DEFAULT_VIDEO_QUALITY: '480', // 360, 480, 720, 1080
+  MAX_HISTORY: 20,
+  HISTORY_KEY: 'pagaska_history',
 };
 
 // ============================
 // STATE
 // ============================
 const state = {
-  isLoading:   false,
+  isLoading: false,
 };
 
 // ============================
@@ -62,255 +60,257 @@ function clearResult() {
   urlInput.focus();
 }
 
-function scrollToHistory() {
-  $('historySection').scrollIntoView({ behavior: 'smooth' });
-}
-
 // ============================
-// URL VALIDATION
+// PLATFORM DETECTION & API ROUTING
 // ============================
-const SUPPORTED_DOMAINS = [
-  'tiktok.com', 'vt.tiktok.com',
-  'instagram.com', 'instagr.am',
-  'facebook.com', 'fb.com', 'fb.watch',
-  'twitter.com', 'x.com', 't.co',
-  'youtube.com', 'youtu.be',
-  'pinterest.com', 'pin.it',
-  'snapchat.com',
-  'reddit.com', 'redd.it',
-  'dailymotion.com',
-  'vimeo.com',
-  'capcut.com',
-  'likee.video',
-  'douyin.com',
-  'weibo.com',
-  'telegram.me', 't.me',
-];
-
-function isValidUrl(url) {
-  try {
-    const parsed = new URL(url.trim());
-    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function detectPlatform(url) {
   try {
-    const host = new URL(url).hostname.replace('www.', '');
-    for (const domain of SUPPORTED_DOMAINS) {
-      if (host === domain || host.endsWith('.' + domain)) {
-        return domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1);
-      }
+    const hostname = new URL(url).hostname.toLowerCase();
+    
+    if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
+      return 'youtube';
     }
-    return 'Media';
+    if (hostname.includes('tiktok.com') || hostname.includes('vt.tiktok.com')) {
+      return 'tiktok';
+    }
+    if (hostname.includes('instagram.com') || hostname.includes('instagr.am')) {
+      return 'instagram';
+    }
+    if (hostname.includes('facebook.com') || hostname.includes('fb.com') || hostname.includes('fb.watch')) {
+      return 'facebook';
+    }
+    if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
+      return 'twitter';
+    }
+    
+    return 'unknown';
   } catch {
-    return 'Media';
+    return 'unknown';
+  }
+}
+
+function getApiEndpoint(platform, url, format = 'mp4') {
+  const encodedUrl = encodeURIComponent(url);
+  
+  switch (platform) {
+    case 'youtube':
+      // YouTube: ytmp3 untuk audio, ytmp4 untuk video
+      if (format === 'mp3') {
+        return `${CONFIG.API_BASE}/ytmp3?url=${encodedUrl}&apikey=${CONFIG.API_KEY}`;
+      } else {
+        return `${CONFIG.API_BASE}/ytmp4?url=${encodedUrl}&quality=${CONFIG.DEFAULT_VIDEO_QUALITY}&apikey=${CONFIG.API_KEY}`;
+      }
+    
+    case 'tiktok':
+      return `${CONFIG.API_BASE}/tiktok?url=${encodedUrl}&apikey=${CONFIG.API_KEY}`;
+    
+    case 'instagram':
+      return `${CONFIG.API_BASE}/instagram?url=${encodedUrl}&apikey=${CONFIG.API_KEY}`;
+    
+    default:
+      // Fallback: coba pakai endpoint yang tersedia
+      return `${CONFIG.API_BASE}/tiktok?url=${encodedUrl}&apikey=${CONFIG.API_KEY}`;
   }
 }
 
 // ============================
-// API FETCHING — with fallback
+// API FETCHING
 // ============================
-async function fetchWithFallback(url) {
-  let lastError = null;
+async function fetchMedia(url, platform, format = 'mp4') {
+  const endpoint = getApiEndpoint(platform, url, format);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
-  for (let i = 0; i < CONFIG.APIs.length; i++) {
-    const apiBase = CONFIG.APIs[i];
-    const apiLabel = i === 0 ? 'API Utama' : i === 1 ? 'API Cadangan' : 'API Backup';
-    $('loadingApi').textContent = `Menghubungi ${apiLabel}...`;
+  try {
+    const res = await fetch(endpoint, {
+      method: 'GET',
+      headers: { 
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      signal: controller.signal,
+    });
+    
+    clearTimeout(timeoutId);
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-      
-      const res = await fetch(apiBase + encodeURIComponent(url), {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' },
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const data = await res.json();
-      if (!data) throw new Error('Respons kosong');
-
-      return { data, apiIndex: i };
-    } catch (err) {
-      console.warn(`[Pagaska] ${apiLabel} gagal:`, err.message);
-      lastError = err;
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`HTTP ${res.status}: ${errorText}`);
     }
-  }
 
-  throw lastError || new Error('Semua API gagal merespons.');
+    const data = await res.json();
+    return data;
+    
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Request timeout - server terlalu lama merespons');
+    }
+    throw err;
+  }
 }
 
 // ============================
-// RESPONSE PARSER — handles different API response structures
+// RESPONSE PARSER (anabot format)
 // ============================
-function parseResponse(data) {
-  let result = {
-    title:     '',
-    thumbnail: '',
-    medias:    [],
+function parseAnabotResponse(data, platform, format) {
+  // Format response anabot:
+  // {
+  //   "status": true,
+  //   "result": {
+  //     "title": "...",
+  //     "thumbnail": "...",
+  //     "download_url": "...",
+  //     "quality": "...",
+  //     "duration": "...",
+  //     ...
+  //   }
+  // }
+
+  if (!data || !data.status) {
+    throw new Error(data?.message || 'API mengembalikan status gagal');
+  }
+
+  const result = data.result || data.data || data;
+  
+  if (!result) {
+    throw new Error('Data tidak ditemukan dalam response');
+  }
+
+  const parsed = {
+    title: result.title || result.name || 'Unknown Title',
+    thumbnail: result.thumbnail || result.cover || result.image || '',
+    medias: [],
   };
 
-  const raw = data?.result || data?.data || data;
-
-  if (!raw) return null;
-
-  // Title
-  result.title = raw.title || raw.caption || raw.description || data.title || '';
-
-  // Thumbnail
-  result.thumbnail =
-    raw.thumbnail || raw.cover || raw.image || raw.thumb ||
-    (Array.isArray(raw.images) ? raw.images[0] : '') ||
-    data.thumbnail || '';
-
-  // ---- Collect medias ----
-
-  // Pattern A: medias array
-  if (Array.isArray(raw.medias) && raw.medias.length > 0) {
-    result.medias = raw.medias.map(m => ({
-      type:   normalizeType(m.type || m.quality || ''),
-      label:   m.quality || m.type || m.label || 'Download',
-      url:     m.url || m.download_url || m.link || '',
-      ext:     m.ext || guessExt(m.url || '', m.type || ''),
-    })).filter(m => m.url);
-    return result;
-  }
-
-  // Pattern B: videos / audio / images as separate keys
-  if (raw.videos || raw.video) {
-    const vids = raw.videos || (raw.video ? [raw.video] : []);
-    const list = Array.isArray(vids) ? vids : [vids];
-    list.forEach((v, i) => {
-      const url = typeof v === 'string' ? v : (v.url || v.download_url || v.link || '');
-      if (url) {
-        result.medias.push({
-          type:  'video',
-          label: v.quality || v.type || `Video ${i + 1}`,
-          url,
-          ext:   'mp4',
-        });
-      }
-    });
-  }
-
-  if (raw.audio || raw.music) {
-    const url = typeof raw.audio === 'string' ? raw.audio :
-                typeof raw.music === 'string' ? raw.music :
-                (raw.audio?.url || raw.music?.url || '');
-    if (url) {
-      result.medias.push({
-        type:  'audio',
-        label: 'Audio / Musik',
-        url,
-        ext:  'mp3',
+  // Handle YouTube MP3 (audio only)
+  if (platform === 'youtube' && format === 'mp3') {
+    if (result.download_url || result.url) {
+      parsed.medias.push({
+        type: 'audio',
+        label: 'Audio MP3',
+        url: result.download_url || result.url,
+        ext: 'mp3',
+        quality: result.quality || '128kbps',
       });
     }
   }
-
-  if (Array.isArray(raw.images) && raw.images.length > 0) {
-    raw.images.forEach((img, i) => {
-      const url = typeof img === 'string' ? img : (img.url || '');
+  // Handle YouTube MP4 (video)
+  else if (platform === 'youtube' && format === 'mp4') {
+    if (result.download_url || result.url) {
+      parsed.medias.push({
+        type: 'video',
+        label: `Video ${result.quality || CONFIG.DEFAULT_VIDEO_QUALITY}p`,
+        url: result.download_url || result.url,
+        ext: 'mp4',
+        quality: result.quality || CONFIG.DEFAULT_VIDEO_QUALITY,
+      });
+    }
+    // Jika ada audio juga
+    if (result.audio_url || result.audio) {
+      parsed.medias.push({
+        type: 'audio',
+        label: 'Audio Only',
+        url: result.audio_url || result.audio,
+        ext: 'mp3',
+      });
+    }
+  }
+  // Handle TikTok
+  else if (platform === 'tiktok') {
+    // Video tanpa watermark
+    if (result.download_url || result.nowm || result.video) {
+      parsed.medias.push({
+        type: 'video',
+        label: 'Video (No WM)',
+        url: result.download_url || result.nowm || result.video,
+        ext: 'mp4',
+      });
+    }
+    // Audio
+    if (result.audio || result.music || result.audio_url) {
+      parsed.medias.push({
+        type: 'audio',
+        label: 'Audio Original',
+        url: result.audio || result.music || result.audio_url,
+        ext: 'mp3',
+      });
+    }
+    // Cover/thumbnail as image
+    if (result.cover || result.thumbnail) {
+      parsed.medias.push({
+        type: 'image',
+        label: 'Cover',
+        url: result.cover || result.thumbnail,
+        ext: 'jpg',
+      });
+    }
+  }
+  // Handle Instagram
+  else if (platform === 'instagram') {
+    // Instagram bisa return array of images/videos
+    if (Array.isArray(result.downloads)) {
+      result.downloads.forEach((item, idx) => {
+        const isVideo = item.type === 'video' || item.url?.includes('.mp4');
+        parsed.medias.push({
+          type: isVideo ? 'video' : 'image',
+          label: isVideo ? `Video ${idx + 1}` : `Gambar ${idx + 1}`,
+          url: item.url || item.download_url,
+          ext: isVideo ? 'mp4' : 'jpg',
+        });
+      });
+    } else if (Array.isArray(result.url)) {
+      result.url.forEach((url, idx) => {
+        const isVideo = url.includes('.mp4');
+        parsed.medias.push({
+          type: isVideo ? 'video' : 'image',
+          label: isVideo ? `Video ${idx + 1}` : `Gambar ${idx + 1}`,
+          url: url,
+          ext: isVideo ? 'mp4' : 'jpg',
+        });
+      });
+    } else {
+      // Single item
+      const url = result.download_url || result.url || result.video || result.image;
       if (url) {
-        result.medias.push({
-          type:  'image',
-          label: `Gambar ${i + 1}`,
-          url,
-          ext:  'jpg',
+        const isVideo = url.includes('.mp4');
+        parsed.medias.push({
+          type: isVideo ? 'video' : 'image',
+          label: isVideo ? 'Video' : 'Gambar',
+          url: url,
+          ext: isVideo ? 'mp4' : 'jpg',
         });
       }
-    });
+    }
   }
 
-  // Pattern C: top-level url field (single download)
-  if (result.medias.length === 0 && (raw.url || raw.download_url || raw.link)) {
-    const url = raw.url || raw.download_url || raw.link;
-    result.medias.push({
-      type:  normalizeType(raw.type || raw.format || ''),
-      label: raw.quality || raw.type || 'Download',
-      url,
-      ext:   guessExt(url, raw.type || ''),
-    });
-  }
-
-  // Pattern D: flat array result (api returns array directly)
-  if (result.medias.length === 0 && Array.isArray(data.result)) {
-    data.result.forEach((item, i) => {
-      const url = item.url || item.download_url || item.link || '';
-      if (url) {
-        result.medias.push({
-          type:  normalizeType(item.type || item.quality || ''),
-          label: item.quality || item.type || `Item ${i + 1}`,
-          url,
-          ext:   guessExt(url, item.type || ''),
-        });
-      }
-    });
-  }
-
-  return result.medias.length > 0 ? result : null;
-}
-
-function normalizeType(type) {
-  const t = String(type).toLowerCase();
-  if (t.includes('audio') || t.includes('mp3') || t.includes('music')) return 'audio';
-  if (t.includes('image') || t.includes('photo') || t.includes('img') || t.includes('jpg') || t.includes('png')) return 'image';
-  return 'video';
-}
-
-function guessExt(url, type) {
-  const t = normalizeType(type);
-  if (t === 'audio') return 'mp3';
-  if (t === 'image') return 'jpg';
-  try {
-    const path = new URL(url).pathname;
-    const ext = path.split('.').pop().toLowerCase();
-    if (['mp4','mp3','jpg','jpeg','png','gif','webp','mov','m4a'].includes(ext)) return ext;
-  } catch {}
-  return 'mp4';
+  return parsed;
 }
 
 // ============================
 // RENDER RESULT
 // ============================
-function renderResult(parsed, url) {
-  const platform = detectPlatform(url);
-
-  // Source label
-  $('mediaSource').textContent = platform;
+function renderResult(parsed, url, platform) {
+  // Platform label
+  const platformNames = {
+    youtube: 'YouTube',
+    tiktok: 'TikTok',
+    instagram: 'Instagram',
+    facebook: 'Facebook',
+    twitter: 'Twitter/X',
+  };
+  $('mediaSource').textContent = platformNames[platform] || 'Media';
 
   // Title
-  $('mediaTitle').textContent = parsed.title || `Media dari ${platform}`;
+  $('mediaTitle').textContent = parsed.title || `Media dari ${platformNames[platform] || 'Unknown'}`;
 
   // Preview
   const previewEl = $('mediaPreview');
   previewEl.innerHTML = '';
 
-  const imageMedias = parsed.medias.filter(m => m.type === 'image');
   const videoMedias = parsed.medias.filter(m => m.type === 'video');
+  const imageMedias = parsed.medias.filter(m => m.type === 'image');
 
-  if (imageMedias.length > 1) {
-    // Image grid
-    const grid = document.createElement('div');
-    grid.className = 'preview-images-grid';
-    imageMedias.slice(0, 6).forEach(m => {
-      const img = document.createElement('img');
-      img.src = parsed.thumbnail || m.url;
-      img.alt = 'Preview';
-      img.loading = 'lazy';
-      img.onerror = () => { img.style.display = 'none'; };
-      grid.appendChild(img);
-    });
-    previewEl.appendChild(grid);
-  } else if (videoMedias.length > 0 && videoMedias[0].url) {
+  if (videoMedias.length > 0 && videoMedias[0].url) {
     // Video preview
     const video = document.createElement('video');
     video.src = videoMedias[0].url;
@@ -318,6 +318,8 @@ function renderResult(parsed, url) {
     video.preload = 'metadata';
     video.poster = parsed.thumbnail || '';
     video.setAttribute('playsinline', '');
+    video.style.width = '100%';
+    video.style.borderRadius = '12px';
     previewEl.appendChild(video);
   } else if (parsed.thumbnail) {
     // Thumbnail image
@@ -325,10 +327,10 @@ function renderResult(parsed, url) {
     img.src = parsed.thumbnail;
     img.alt = 'Thumbnail';
     img.loading = 'lazy';
+    img.style.width = '100%';
+    img.style.borderRadius = '12px';
     img.onerror = () => { previewEl.style.display = 'none'; };
     previewEl.appendChild(img);
-  } else {
-    previewEl.style.minHeight = '0';
   }
 
   // Download options
@@ -340,7 +342,7 @@ function renderResult(parsed, url) {
     return;
   }
 
-  parsed.medias.forEach((media, idx) => {
+  parsed.medias.forEach((media) => {
     const item = document.createElement('div');
     item.className = 'option-item';
 
@@ -348,7 +350,7 @@ function renderResult(parsed, url) {
       video: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>`,
       audio: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
       image: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`,
-    }[media.type] || iconHtml.video;
+    }[media.type];
 
     item.innerHTML = `
       <div class="option-info">
@@ -382,7 +384,7 @@ function renderResult(parsed, url) {
 // ============================
 // MAIN DOWNLOAD HANDLER
 // ============================
-async function handleDownload() {
+async function handleDownload(format = 'mp4') {
   if (state.isLoading) return;
 
   const url = urlInput.value.trim();
@@ -394,9 +396,20 @@ async function handleDownload() {
     return;
   }
 
-  if (!isValidUrl(url)) {
-    showToast('URL tidak valid. Pastikan dimulai dengan https://', 'error');
+  // Detect platform
+  const platform = detectPlatform(url);
+  
+  if (platform === 'unknown') {
+    showToast('Platform tidak didukung. Gunakan: YouTube, TikTok, Instagram', 'error');
     return;
+  }
+
+  if (platform === 'youtube' && format === 'mp3') {
+    $('loadingApi').textContent = 'Mengambil audio YouTube...';
+  } else if (platform === 'youtube') {
+    $('loadingApi').textContent = 'Mengambil video YouTube...';
+  } else {
+    $('loadingApi').textContent = `Mengambil dari ${platform}...`;
   }
 
   // Set loading state
@@ -405,31 +418,20 @@ async function handleDownload() {
   showSection('loadingSection');
 
   try {
-    const { data, apiIndex } = await fetchWithFallback(url);
+    const data = await fetchMedia(url, platform, format);
+    const parsed = parseAnabotResponse(data, platform, format);
 
-    // Check API-level success
-    const isSuccess = data.status === true || data.status === 'success' ||
-                      data.success === true || data.ok === true ||
-                      (data.result && !data.error);
-
-    if (!isSuccess && (data.message || data.error)) {
-      throw new Error(data.message || data.error || 'API mengembalikan status gagal.');
-    }
-
-    const parsed = parseResponse(data);
-
-    if (!parsed || parsed.medias.length === 0) {
-      throw new Error('Tidak ada media yang dapat diunduh dari URL ini. Coba link lain.');
+    if (!parsed.medias || parsed.medias.length === 0) {
+      throw new Error('Tidak ada media yang dapat diunduh dari URL ini.');
     }
 
     // Save to history
-    saveHistory(url, parsed);
+    saveHistory(url, parsed, platform);
 
     // Render
-    renderResult(parsed, url);
+    renderResult(parsed, url, platform);
 
-    const apiName = apiIndex === 0 ? 'API Utama' : apiIndex === 1 ? 'API Cadangan' : 'API Backup';
-    showToast(`Berhasil! (via ${apiName})`, 'success');
+    showToast('Berhasil!', 'success');
 
   } catch (err) {
     console.error('[Pagaska] Error:', err);
@@ -439,6 +441,94 @@ async function handleDownload() {
     state.isLoading = false;
     $('downloadBtn').disabled = false;
   }
+}
+
+// ============================
+// FORMAT SELECTOR (for YouTube)
+// ============================
+function showFormatSelector() {
+  const url = urlInput.value.trim();
+  const platform = detectPlatform(url);
+  
+  if (platform !== 'youtube') {
+    // Non-YouTube langsung download
+    handleDownload('mp4');
+    return;
+  }
+
+  // YouTube: tampilkan pilihan MP3 atau MP4
+  const existing = document.querySelector('.format-selector');
+  if (existing) existing.remove();
+
+  const selector = document.createElement('div');
+  selector.className = 'format-selector';
+  selector.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--bg-card, #1a1a1a);
+    padding: 24px;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    z-index: 1000;
+    text-align: center;
+    min-width: 280px;
+  `;
+  
+  selector.innerHTML = `
+    <h3 style="margin:0 0 16px 0;color:var(--text-main,#fff);">Pilih Format</h3>
+    <div style="display:flex;gap:12px;justify-content:center;">
+      <button onclick="closeFormatSelector();handleDownload('mp3')" style="
+        padding: 12px 24px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        border-radius: 8px;
+        color: white;
+        cursor: pointer;
+        font-weight: 600;
+      ">🎵 Audio (MP3)</button>
+      <button onclick="closeFormatSelector();handleDownload('mp4')" style="
+        padding: 12px 24px;
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        border: none;
+        border-radius: 8px;
+        color: white;
+        cursor: pointer;
+        font-weight: 600;
+      ">🎬 Video (MP4)</button>
+    </div>
+    <button onclick="closeFormatSelector()" style="
+      margin-top: 16px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted, #888);
+      cursor: pointer;
+    ">Batal</button>
+  `;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'format-overlay';
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    z-index: 999;
+  `;
+  overlay.onclick = closeFormatSelector;
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(selector);
+}
+
+function closeFormatSelector() {
+  const selector = document.querySelector('.format-selector');
+  const overlay = document.querySelector('.format-overlay');
+  if (selector) selector.remove();
+  if (overlay) overlay.remove();
 }
 
 // ============================
@@ -472,15 +562,15 @@ function saveHistoryData(items) {
   localStorage.setItem(CONFIG.HISTORY_KEY, JSON.stringify(items));
 }
 
-function saveHistory(url, parsed) {
+function saveHistory(url, parsed, platform) {
   const items = loadHistory();
-  // Remove duplicate URL
   const filtered = items.filter(h => h.url !== url);
   filtered.unshift({
     url,
-    title:     parsed.title || url,
+    title: parsed.title || url,
     thumbnail: parsed.thumbnail || '',
-    time:      Date.now(),
+    platform: platform,
+    time: Date.now(),
   });
   saveHistoryData(filtered.slice(0, CONFIG.MAX_HISTORY));
   renderHistory();
@@ -496,7 +586,7 @@ function reuseHistory(url) {
   urlInput.value = url;
   clearBtn.classList.add('visible');
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  setTimeout(() => handleDownload(), 300);
+  setTimeout(() => showFormatSelector(), 300);
 }
 
 function renderHistory() {
@@ -521,11 +611,18 @@ function renderHistory() {
     el.className = 'history-item';
     const timeAgo = formatTimeAgo(item.time);
     const shortUrl = item.url.length > 55 ? item.url.slice(0, 52) + '…' : item.url;
+    const platformIcon = {
+      youtube: '▶️',
+      tiktok: '🎵',
+      instagram: '📷',
+      facebook: '👍',
+      twitter: '🐦',
+    }[item.platform] || '📎';
 
     el.innerHTML = `
       ${item.thumbnail
-        ? `<img class="history-thumb" src="${escAttr(item.thumbnail)}" alt="thumb" loading="lazy" onerror="this.outerHTML='<div class=\'history-thumb-placeholder\'><svg viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\'><path d=\'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z\'/></svg></div>'">`
-        : `<div class="history-thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>`
+        ? `<img class="history-thumb" src="${escAttr(item.thumbnail)}" alt="thumb" loading="lazy" onerror="this.outerHTML='<div class=\'history-thumb-placeholder\'>${platformIcon}</div>'">`
+        : `<div class="history-thumb-placeholder">${platformIcon}</div>`
       }
       <div class="history-details">
         <span class="history-url" title="${escAttr(item.url)}">${escHtml(shortUrl)}</span>
@@ -597,10 +694,19 @@ document.addEventListener('DOMContentLoaded', () => {
   renderHistory();
   urlInput.focus();
 
-  // Paste shortcut hint
+  // Paste handler
   urlInput.addEventListener('paste', () => {
     setTimeout(() => {
       clearBtn.classList.toggle('visible', urlInput.value.length > 0);
     }, 50);
   });
+
+  // Update download button to show format selector
+  const dlBtn = $('downloadBtn');
+  if (dlBtn) {
+    dlBtn.onclick = (e) => {
+      e.preventDefault();
+      showFormatSelector();
+    };
+  }
 });
