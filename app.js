@@ -8,10 +8,9 @@
 // CONFIG
 // ============================================================
 const CONFIG = {
-  APIs: [
-    'https://api-faa.my.id/faa/aio?url=',
-    'https://api.theresav.biz.id/download/aio?url='
-  ],
+  DOWNR_ANALYTICS: 'https://downr.org/.netlify/functions/analytics',
+  DOWNR_DOWNLOAD:  'https://downr.org/.netlify/functions/download',
+  DOWNR_UA:        'Mozilla/5.0 (Linux; Android 15; SM-F958 Build/AP3A.240905.015) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.86 Mobile Safari/537.36',
   RATE_LIMIT_MS: 5000,   // Minimum delay between requests
   MAX_HISTORY:   20,      // Max history entries stored
   HISTORY_KEY:   'pagaska_history',
@@ -113,37 +112,56 @@ function detectPlatform(url) {
 }
 
 // ============================================================
-// API FETCHING — with fallback
+// DOWNR SCRAPER — direct scrape to downr.org (no REST API)
 // ============================================================
 async function fetchWithFallback(url) {
-  let lastError = null;
+  $('loadingApi').textContent = 'Menghubungi downr.org...';
 
-  for (let i = 0; i < CONFIG.APIs.length; i++) {
-    const apiBase = CONFIG.APIs[i];
-    const apiLabel = i === 0 ? 'API Utama' : 'API Cadangan';
-    $('loadingApi').textContent = `Menghubungi ${apiLabel}...`;
+  // Step 1: hit analytics endpoint to grab the session cookie
+  const analyticsRes = await fetch(CONFIG.DOWNR_ANALYTICS, {
+    method: 'GET',
+    headers: {
+      'referer': 'https://downr.org/',
+      'user-agent': CONFIG.DOWNR_UA,
+    },
+    credentials: 'include',
+    signal: AbortSignal.timeout(15000),
+  });
 
-    try {
-      const res = await fetch(apiBase + encodeURIComponent(url), {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(15000),
-      });
+  const cookie = analyticsRes.headers.get('set-cookie') || '';
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  $('loadingApi').textContent = 'Mengambil media...';
 
-      const data = await res.json();
-      if (!data) throw new Error('Respons kosong');
+  // Step 2: POST the target URL to the download endpoint
+  const dlRes = await fetch(CONFIG.DOWNR_DOWNLOAD, {
+    method: 'POST',
+    headers: {
+      'accept': '*/*',
+      'accept-encoding': 'gzip, deflate, br',
+      'accept-language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+      'content-type': 'application/json',
+      'cookie': cookie,
+      'origin': 'https://downr.org',
+      'referer': 'https://downr.org/',
+      'sec-ch-ua': '"Chromium";v="137", "Not/A)Brand";v="24"',
+      'sec-ch-ua-mobile': '?1',
+      'sec-ch-ua-platform': '"Android"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'user-agent': CONFIG.DOWNR_UA,
+    },
+    body: JSON.stringify({ url }),
+    credentials: 'include',
+    signal: AbortSignal.timeout(15000),
+  });
 
-      return { data, apiIndex: i };
-    } catch (err) {
-      console.warn(`[Pagaska] ${apiLabel} gagal:`, err.message);
-      lastError = err;
-      // Continue to next API
-    }
-  }
+  if (!dlRes.ok) throw new Error(`HTTP ${dlRes.status}`);
 
-  throw lastError || new Error('Semua API gagal merespons.');
+  const data = await dlRes.json();
+  if (!data) throw new Error('Respons kosong dari downr.org');
+
+  return { data, apiIndex: 0 };
 }
 
 // ============================================================
@@ -441,8 +459,7 @@ async function handleDownload() {
     // Render
     renderResult(parsed, url);
 
-    const apiName = apiIndex === 0 ? 'API Utama' : 'API Cadangan';
-    showToast(`Berhasil! (via ${apiName})`, 'success');
+    showToast('Berhasil! (via downr.org)', 'success');
 
   } catch (err) {
     console.error('[Pagaska] Error:', err);
