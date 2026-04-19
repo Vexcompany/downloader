@@ -688,6 +688,72 @@ function escAttr(str) {
 }
 
 // ============================
+// PLATFORM DETECTION UI
+// ============================
+function updateUIForPlatform() {
+  const url = urlInput.value.trim();
+  const platform = detectPlatform(url);
+  const quickFormats = document.getElementById('quickFormats');
+  
+  if (platform === 'youtube' && url.length > 0) {
+    quickFormats.style.display = 'flex';
+  } else {
+    quickFormats.style.display = 'none';
+  }
+}
+
+// Update init section di bagian paling bawah:
+document.addEventListener('DOMContentLoaded', () => {
+  renderHistory();
+  urlInput.focus();
+
+  // Platform detection on input
+  urlInput.addEventListener('input', () => {
+    clearBtn.classList.toggle('visible', urlInput.value.length > 0);
+    updateUIForPlatform();
+  });
+
+  // Paste handler
+  urlInput.addEventListener('paste', () => {
+    setTimeout(() => {
+      clearBtn.classList.toggle('visible', urlInput.value.length > 0);
+      updateUIForPlatform();
+    }, 50);
+  });
+
+  // Download button - show format selector for YouTube
+  const dlBtn = document.getElementById('downloadBtn');
+  if (dlBtn) {
+    dlBtn.onclick = (e) => {
+      e.preventDefault();
+      const url = urlInput.value.trim();
+      const platform = detectPlatform(url);
+      
+      if (!url) {
+        showToast('Masukkan URL terlebih dahulu.', 'error');
+        urlInput.focus();
+        return;
+      }
+      
+      if (platform === 'unknown') {
+        showToast('Platform tidak didukung.', 'error');
+        return;
+      }
+      
+      if (platform === 'youtube') {
+        // YouTube: tampilkan pilihan format jika belum ada
+        if (!document.querySelector('.format-selector')) {
+          showFormatSelector();
+        }
+      } else {
+        // Platform lain: langsung download
+        handleDownload('mp4');
+      }
+    };
+  }
+});
+
+// ============================
 // INIT
 // ============================
 document.addEventListener('DOMContentLoaded', () => {
