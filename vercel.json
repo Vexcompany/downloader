@@ -1,15 +1,11 @@
 {
   "version": 2,
-  "routes": [
-    { "src": "/api/downr", "dest": "/api/downr.js" },
-    { "src": "/(.*)", "dest": "/$1" }
-  ],
-  "functions": {
-    "api/downr.js": {
-      "memory": 256,
-      "maxDuration": 30
+  "builds": [
+    {
+      "src": "index.html",
+      "use": "@vercel/static"
     }
-  },
+  ],
   "headers": [
     {
       "source": "/(.*)",
