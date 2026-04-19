@@ -1136,11 +1136,9 @@ body {
 // CONFIG
 // ============================================================
 var CONFIG = {
-  APIs: [
-    'https://api-faa.my.id/faa/aio?url=',
-    'https://api.theresav.biz.id/download/aio?url='
-  ],
-  RATE_LIMIT_MS: 5000,
+  DOWNR_ANALYTICS: 'https://downr.org/.netlify/functions/analytics',
+  DOWNR_DOWNLOAD:  'https://downr.org/.netlify/functions/download',
+  DOWNR_UA:        'Mozilla/5.0 (Linux; Android 15; SM-F958 Build/AP3A.240905.015) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.86 Mobile Safari/537.36',
   MAX_HISTORY:   20,
   HISTORY_KEY:   'pagaska_history',
 };
@@ -1226,30 +1224,55 @@ function detectPlatform(url) {
 }
 
 // ============================================================
-// API FETCHING — with fallback
+// DOWNR SCRAPER — direct scrape to downr.org (no REST API)
 // ============================================================
 async function fetchWithFallback(url) {
-  var lastError = null;
-  for (var i = 0; i < CONFIG.APIs.length; i++) {
-    var apiBase  = CONFIG.APIs[i];
-    var apiLabel = i === 0 ? 'API Utama' : 'API Cadangan';
-    var lbl = $('loadingApi');
-    if (lbl) lbl.textContent = 'Menghubungi ' + apiLabel + '...';
-    try {
-      var res = await fetch(apiBase + encodeURIComponent(url), {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' },
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      var data = await res.json();
-      if (!data) throw new Error('Respons kosong');
-      return { data: data, apiIndex: i };
-    } catch (err) {
-      console.warn('[Pagaska] ' + apiLabel + ' gagal:', err.message);
-      lastError = err;
-    }
-  }
-  throw lastError || new Error('Semua API gagal merespons.');
+  var lbl = $('loadingApi');
+  if (lbl) lbl.textContent = 'Menghubungi downr.org...';
+
+  // Step 1: hit analytics endpoint to grab session cookie
+  var analyticsRes = await fetch(CONFIG.DOWNR_ANALYTICS, {
+    method: 'GET',
+    headers: {
+      'referer': 'https://downr.org/',
+      'user-agent': CONFIG.DOWNR_UA,
+    },
+    credentials: 'include',
+  });
+
+  var cookie = analyticsRes.headers.get('set-cookie') || '';
+
+  if (lbl) lbl.textContent = 'Mengambil media...';
+
+  // Step 2: POST the target URL to the download endpoint
+  var dlRes = await fetch(CONFIG.DOWNR_DOWNLOAD, {
+    method: 'POST',
+    headers: {
+      'accept': '*/*',
+      'accept-encoding': 'gzip, deflate, br',
+      'accept-language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+      'content-type': 'application/json',
+      'cookie': cookie,
+      'origin': 'https://downr.org',
+      'referer': 'https://downr.org/',
+      'sec-ch-ua': '"Chromium";v="137", "Not/A)Brand";v="24"',
+      'sec-ch-ua-mobile': '?1',
+      'sec-ch-ua-platform': '"Android"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'user-agent': CONFIG.DOWNR_UA,
+    },
+    body: JSON.stringify({ url: url }),
+    credentials: 'include',
+  });
+
+  if (!dlRes.ok) throw new Error('HTTP ' + dlRes.status);
+
+  var data = await dlRes.json();
+  if (!data) throw new Error('Respons kosong dari downr.org');
+
+  return { data: data, apiIndex: 0 };
 }
 
 // ============================================================
@@ -1257,7 +1280,8 @@ async function fetchWithFallback(url) {
 // ============================================================
 function normalizeType(type) {
   var t = String(type).toLowerCase();
-  if (t.indexOf('audio') !== -1 || t.indexOf('mp3') !== -1 || t.indexOf('music') !== -1) return 'audio';
+  if (t.indexOf('audio') !== -1 || t.indexOf('mp3') !== -1 || t.indexOf('music') !== -1 ||
+      t.indexOf('m4a') !== -1   || t.indexOf('opus') !== -1 || t.indexOf('ogg') !== -1) return 'audio';
   if (t.indexOf('image') !== -1 || t.indexOf('photo') !== -1 || t.indexOf('img') !== -1 ||
       t.indexOf('jpg') !== -1   || t.indexOf('png') !== -1) return 'image';
   return 'video';
@@ -1265,12 +1289,16 @@ function normalizeType(type) {
 
 function guessExt(url, type) {
   var t = normalizeType(type);
+  // Cek ekstensi dari tipe secara eksplisit dulu
+  var tl = String(type).toLowerCase();
+  if (tl === 'm4a' || tl.indexOf('m4a') !== -1) return 'm4a';
+  if (tl === 'opus' || tl.indexOf('opus') !== -1) return 'opus';
   if (t === 'audio') return 'mp3';
   if (t === 'image') return 'jpg';
   try {
     var pathname = new URL(url).pathname;
     var ext = pathname.split('.').pop().toLowerCase();
-    if (['mp4','mp3','jpg','jpeg','png','gif','webm','mov','m4a'].indexOf(ext) !== -1) return ext;
+    if (['mp4','mp3','jpg','jpeg','png','gif','webm','mov','m4a','opus','ogg'].indexOf(ext) !== -1) return ext;
   } catch (e) {}
   return 'mp4';
 }
@@ -1460,13 +1488,6 @@ async function handleDownload() {
     return;
   }
 
-  var now = Date.now();
-  if (now - state.lastRequest < CONFIG.RATE_LIMIT_MS) {
-    var wait = Math.ceil((CONFIG.RATE_LIMIT_MS - (now - state.lastRequest)) / 1000);
-    showToast('Tunggu ' + wait + ' detik sebelum request berikutnya.', 'error');
-    return;
-  }
-
   state.isLoading   = true;
   state.lastRequest = now;
   var dlBtn = $('downloadBtn');
@@ -1493,7 +1514,7 @@ async function handleDownload() {
 
     saveHistory(url, parsed);
     renderResult(parsed, url);
-    showToast('Berhasil! (via ' + (apiIndex === 0 ? 'API Utama' : 'API Cadangan') + ')', 'success');
+    showToast('Berhasil! (via downr.org)', 'success');
 
   } catch (err) {
     console.error('[Pagaska] Error:', err);
