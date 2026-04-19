@@ -12,7 +12,6 @@ const CONFIG = {
     'https://api-faa.my.id/faa/aio?url=',
     'https://api.theresav.biz.id/download/aio?url='
   ],
-  RATE_LIMIT_MS: 5000,   // Minimum delay between requests
   MAX_HISTORY:   20,      // Max history entries stored
   HISTORY_KEY:   'pagaska_history',
 };
@@ -21,7 +20,6 @@ const CONFIG = {
 // STATE
 // ============================================================
 const state = {
-  lastRequest: 0,
   isLoading:   false,
 };
 
@@ -403,17 +401,8 @@ async function handleDownload() {
     return;
   }
 
-  // Rate limiting
-  const now = Date.now();
-  if (now - state.lastRequest < CONFIG.RATE_LIMIT_MS) {
-    const wait = Math.ceil((CONFIG.RATE_LIMIT_MS - (now - state.lastRequest)) / 1000);
-    showToast(`Tunggu ${wait} detik sebelum request berikutnya.`, 'error');
-    return;
-  }
-
   // Set loading state
   state.isLoading = true;
-  state.lastRequest = now;
   $('downloadBtn').disabled = true;
   showSection('loadingSection');
 
