@@ -1,31 +1,32 @@
 /**
  * PAGASKA DOWNLOADER — app.js
  * Download media from social platforms via REST API
- * Primary API: api-faa.my.id | Fallback: api.theresav.biz.id
+ * Updated: Fixed API endpoints
  */
 
-// ============================================================
+// ============================
 // CONFIG
-// ============================================================
+// ============================
 const CONFIG = {
   APIs: [
-    'https://api-faa.my.id/faa/aio?url=',
-    'https://api.theresav.biz.id/download/aio?url='
+    'https://api.pansy.5gv2.cc/api/aio?url=',           // Primary - Fast
+    'https://api.ryzendesu.vip/api/downloader/aio?url=', // Fallback - Ryzen
+    'https://api.siputzx.my.id/api/d/downloader?url='    // Backup - Siputzx
   ],
-  MAX_HISTORY:   20,      // Max history entries stored
-  HISTORY_KEY:   'pagaska_history',
+  MAX_HISTORY:  20,
+  HISTORY_KEY:  'pagaska_history',
 };
 
-// ============================================================
+// ============================
 // STATE
-// ============================================================
+// ============================
 const state = {
   isLoading:   false,
 };
 
-// ============================================================
+// ============================
 // DOM HELPERS
-// ============================================================
+// ============================
 const $ = (id) => document.getElementById(id);
 
 function show(id) { $(id).style.display = ''; }
@@ -36,9 +37,9 @@ function showSection(name) {
   if (name) show(name);
 }
 
-// ============================================================
+// ============================
 // INPUT HANDLING
-// ============================================================
+// ============================
 const urlInput = $('urlInput');
 const clearBtn = $('clearBtn');
 
@@ -65,9 +66,9 @@ function scrollToHistory() {
   $('historySection').scrollIntoView({ behavior: 'smooth' });
 }
 
-// ============================================================
+// ============================
 // URL VALIDATION
-// ============================================================
+// ============================
 const SUPPORTED_DOMAINS = [
   'tiktok.com', 'vt.tiktok.com',
   'instagram.com', 'instagr.am',
@@ -90,7 +91,7 @@ function isValidUrl(url) {
   try {
     const parsed = new URL(url.trim());
     if (!['http:', 'https:'].includes(parsed.protocol)) return false;
-    return true; // Accept any valid URL, API will validate support
+    return true;
   } catch {
     return false;
   }
@@ -110,23 +111,28 @@ function detectPlatform(url) {
   }
 }
 
-// ============================================================
+// ============================
 // API FETCHING — with fallback
-// ============================================================
+// ============================
 async function fetchWithFallback(url) {
   let lastError = null;
 
   for (let i = 0; i < CONFIG.APIs.length; i++) {
     const apiBase = CONFIG.APIs[i];
-    const apiLabel = i === 0 ? 'API Utama' : 'API Cadangan';
+    const apiLabel = i === 0 ? 'API Utama' : i === 1 ? 'API Cadangan' : 'API Backup';
     $('loadingApi').textContent = `Menghubungi ${apiLabel}...`;
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      
       const res = await fetch(apiBase + encodeURIComponent(url), {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(15000),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -137,23 +143,16 @@ async function fetchWithFallback(url) {
     } catch (err) {
       console.warn(`[Pagaska] ${apiLabel} gagal:`, err.message);
       lastError = err;
-      // Continue to next API
     }
   }
 
   throw lastError || new Error('Semua API gagal merespons.');
 }
 
-// ============================================================
+// ============================
 // RESPONSE PARSER — handles different API response structures
-// ============================================================
+// ============================
 function parseResponse(data) {
-  // Normalize: handle various API response shapes
-  // Shape 1: { status, result: { title, thumbnail, medias: [...] } }
-  // Shape 2: { status, data: { title, thumbnail, images/videos/audio } }
-  // Shape 3: { success, result: [...] }  (flat array)
-  // Shape 4: { status, result: { url, quality, ... } }  (single item)
-
   let result = {
     title:     '',
     thumbnail: '',
@@ -178,7 +177,7 @@ function parseResponse(data) {
   // Pattern A: medias array
   if (Array.isArray(raw.medias) && raw.medias.length > 0) {
     result.medias = raw.medias.map(m => ({
-      type:    normalizeType(m.type || m.quality || ''),
+      type:   normalizeType(m.type || m.quality || ''),
       label:   m.quality || m.type || m.label || 'Download',
       url:     m.url || m.download_url || m.link || '',
       ext:     m.ext || guessExt(m.url || '', m.type || ''),
@@ -212,7 +211,7 @@ function parseResponse(data) {
         type:  'audio',
         label: 'Audio / Musik',
         url,
-        ext:   'mp3',
+        ext:  'mp3',
       });
     }
   }
@@ -225,7 +224,7 @@ function parseResponse(data) {
           type:  'image',
           label: `Gambar ${i + 1}`,
           url,
-          ext:   'jpg',
+          ext:  'jpg',
         });
       }
     });
@@ -271,18 +270,17 @@ function guessExt(url, type) {
   const t = normalizeType(type);
   if (t === 'audio') return 'mp3';
   if (t === 'image') return 'jpg';
-  // Try from URL
   try {
     const path = new URL(url).pathname;
     const ext = path.split('.').pop().toLowerCase();
-    if (['mp4','mp3','jpg','jpeg','png','gif','webm','mov','m4a'].includes(ext)) return ext;
+    if (['mp4','mp3','jpg','jpeg','png','gif','webp','mov','m4a'].includes(ext)) return ext;
   } catch {}
   return 'mp4';
 }
 
-// ============================================================
+// ============================
 // RENDER RESULT
-// ============================================================
+// ============================
 function renderResult(parsed, url) {
   const platform = detectPlatform(url);
 
@@ -357,7 +355,7 @@ function renderResult(parsed, url) {
         <div class="option-type-icon ${media.type}">${iconHtml}</div>
         <div class="option-details">
           <span class="option-name">${escHtml(media.label)}</span>
-          <span class="option-meta">${media.type.toUpperCase()} · .${media.ext}</span>
+          <span class="option-meta">${media.type.toUpperCase()} • .${media.ext}</span>
         </div>
       </div>
       <div class="option-actions">
@@ -381,9 +379,9 @@ function renderResult(parsed, url) {
   showSection('resultSection');
 }
 
-// ============================================================
+// ============================
 // MAIN DOWNLOAD HANDLER
-// ============================================================
+// ============================
 async function handleDownload() {
   if (state.isLoading) return;
 
@@ -430,7 +428,7 @@ async function handleDownload() {
     // Render
     renderResult(parsed, url);
 
-    const apiName = apiIndex === 0 ? 'API Utama' : 'API Cadangan';
+    const apiName = apiIndex === 0 ? 'API Utama' : apiIndex === 1 ? 'API Cadangan' : 'API Backup';
     showToast(`Berhasil! (via ${apiName})`, 'success');
 
   } catch (err) {
@@ -443,9 +441,9 @@ async function handleDownload() {
   }
 }
 
-// ============================================================
+// ============================
 // COPY LINK
-// ============================================================
+// ============================
 async function copyLink(url, btn) {
   try {
     await navigator.clipboard.writeText(url);
@@ -461,9 +459,9 @@ async function copyLink(url, btn) {
   }
 }
 
-// ============================================================
+// ============================
 // HISTORY
-// ============================================================
+// ============================
 function loadHistory() {
   try {
     return JSON.parse(localStorage.getItem(CONFIG.HISTORY_KEY) || '[]');
@@ -526,7 +524,7 @@ function renderHistory() {
 
     el.innerHTML = `
       ${item.thumbnail
-        ? `<img class="history-thumb" src="${escAttr(item.thumbnail)}" alt="thumb" loading="lazy" onerror="this.outerHTML='<div class=\\'history-thumb-placeholder\\'><svg viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'currentColor\\' stroke-width=\\'2\\'><path d=\\'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z\\'/></svg></div>'">`
+        ? `<img class="history-thumb" src="${escAttr(item.thumbnail)}" alt="thumb" loading="lazy" onerror="this.outerHTML='<div class=\'history-thumb-placeholder\'><svg viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\'><path d=\'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z\'/></svg></div>'">`
         : `<div class="history-thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>`
       }
       <div class="history-details">
@@ -550,9 +548,9 @@ function formatTimeAgo(ts) {
   return `${d} hari lalu`;
 }
 
-// ============================================================
+// ============================
 // TOAST NOTIFICATION
-// ============================================================
+// ============================
 let toastTimeout;
 
 function showToast(msg, type = 'info') {
@@ -576,9 +574,9 @@ function showToast(msg, type = 'info') {
   }, 3000);
 }
 
-// ============================================================
+// ============================
 // UTILITIES
-// ============================================================
+// ============================
 function escHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -592,9 +590,9 @@ function escAttr(str) {
   return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
-// ============================================================
+// ============================
 // INIT
-// ============================================================
+// ============================
 document.addEventListener('DOMContentLoaded', () => {
   renderHistory();
   urlInput.focus();
