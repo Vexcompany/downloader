@@ -1488,8 +1488,7 @@ async function handleDownload() {
     return;
   }
 
-  state.isLoading   = true;
-  state.lastRequest = now;
+  state.isLoading = true;
   var dlBtn = $('downloadBtn');
   if (dlBtn) dlBtn.disabled = true;
   showSection('loadingSection');
